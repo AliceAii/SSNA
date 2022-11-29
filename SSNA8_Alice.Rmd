@@ -1,0 +1,209 @@
+---
+title: 'SSNA 8 Deliverable: Friendship Peer Effect'
+author: "Alice (Shuhan Ai)"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.width=12, fig.height=8)
+```
+
+# Deliverable 8 Friendship Peer Effect
+
+```{r, echo=TRUE, warning=FALSE, message=FALSE}
+rm(list = ls())
+
+#load packages
+library(spatialreg)
+library(spdep)
+library(igraph)
+library(classInt)
+library(RColorBrewer)
+
+#load Fridenship dataset
+idfriend <- "1dwX4kKlx-ctkU0JyH74p3r1w-jJdTAqi"
+friendshiplazega <- read.csv(sprintf("https://docs.google.com/uc?id=%s&export=download", idfriend))
+friendshiplazega <- as.matrix(friendshiplazega)
+friendshiplazegac <- friendshiplazega
+dim(friendshiplazega)
+
+#Reading attributes also provided by Lazega
+idattributes <- "1e0GtrRS5PFFNdnd1e4fJcjeuBZ6deF7g"
+datattrout <- read.csv(sprintf("https://docs.google.com/uc?id=%s&export=download", idattributes))
+
+#Normalize the dataset. 
+friendshiplazega <-friendshiplazega /rowSums(friendshiplazega)
+summary(rowSums(friendshiplazega))
+#6 Na's means there are 6 layers didn't have friends with anybody.
+
+# Replacing potential NAN to zeros as shown in equation (22)
+friendshiplazega[is.na(friendshiplazega)]<-0
+listwAd<-mat2listw(friendshiplazega)
+
+#we are allowing the isolated individuals in the weighted list,zero.policy=T
+summary(listwAd, zero.policy=T)
+```
+
+## Q1 Testing influence. Is there evidence of stronger dependence in the per hour rate compared to the fees brought in 1990 amounts?
+
+```{r, echo=TRUE, warning=FALSE, message=FALSE}
+moran.test(datattrout$HrRATE90,listwAd, zero.policy=TRUE)
+moran.test(datattrout$FeesCollec90,listwAd, zero.policy=TRUE)
+```
+
+Morean test for the individual hour rate, p\<0.001, Moran I is positive 0.521, indicating that we have enough evidence to conclude that the our outcomes consistently change with our peers, either our outcomes and peers outcomes all over the mean or all under the mean.
+
+Morean test for the individual fees brought in 1990, p\<0.001, Moran I is positive 0.455, indicating that we have enough evidence to conclude that the fees we brought are similar with our peers, we either have consistently fees brought in 1990 over the mean, or we and our peers fees brought in 1990 all under the mean value.
+
+And compared with peers influence on individual's hour rate, our peers have less impact on fees brought in 1990, since 0.521\>0.455. Therefore, there is evidence of stronger dependence in the per hour rate compared to the fees brought in 1990 amounts.
+
+```{r, echo=TRUE, warning=FALSE, message=FALSE}
+#Visualizing Local Moran’s I clusters and outliers 
+
+mtHrRATE90 <- moran.test(datattrout$HrRATE90, listwAd, zero.policy=TRUE)
+label_x = "Individual Per Hour Rate"
+label_y = "Lagged Peer's Per Hour Rate"
+
+mpHrRATE90 <- moran.plot(datattrout$HrRATE90, listwAd, zero.policy=T,
+                 labels=datattrout$id, xlab = label_x, ylab = label_y)
+title(main="Moran’s Plot for Per Hour Rate", cex.main=2, col.main="grey11", 
+      font.main=2, sub=paste("Plot includes 71 lawyers (Moran’s I = ", 
+                             round(mtHrRATE90$ estimate[1], 3), ", p < .0001)", sep=""), 
+      cex.sub=1.15, col.sub="grey11", font.sub=2,)
+#x axis means individual's per hour rate, y axis means our peers' mean per hour rate
+
+```
+
+```{r, echo=TRUE, warning=FALSE, message=FALSE}
+mtFeesCollec90 <- moran.test(datattrout$FeesCollec90, listwAd, zero.policy=TRUE)
+label_x = "Individual Fees Brought in 1990"
+label_y = "Lagged Peer's Fees Brought in 1990"
+
+mpFeesCollec90 <- moran.plot(datattrout$FeesCollec90, listwAd, zero.policy=T,
+                         labels=datattrout$id, xlab = label_x, ylab = label_y)
+title(main="Moran’s Plot for Fees Brought in 1990", cex.main=2, col.main="grey11", 
+      font.main=2, sub=paste("Plot includes 71 lawyers (Moran’s I = ", 
+                             round(mtFeesCollec90$ estimate[1], 3), ", p < .0001)", sep=""), cex.sub=1.15, col.sub="grey11", font.sub=2,)
+```
+
+## Q2 Did you have to modify the empty model to correct for spatial dependence? That is, was the dependence issue addressed with the empty regression models? Explain the likely mechanisms behind this process.
+
+Leveraging SAR (Simultaneous Autoregressive) methods, which uses a regression on the values from the other neighboring areas, as captured by the weight matrix (wij), also used in Moran's I procedures, to account for spatial/outcome dependence.Since this outcome dependece is the source of RSODA, the inclusion of lambda wijy in the model should yeild model residuals that are i.i.d.
+
+Procedually, we may estimate the null or empty model relying on SAR,then we may extract the model residuals and test for whether their tend to co-vary in the same direction as their neighbors' residuals do, with respect to the residual mean.
+
+```{r, echo=TRUE, warning=FALSE, message=FALSE}
+##SAR procedures for social dependence for outcome 1 - Per Hour Rate
+Hrrate90Ad <- spautolm(formula = HrRATE90 ~ 1, data = data.frame(datattrout), listw = listwAd)
+summary(Hrrate90Ad)
+```
+
+lambda = 0.904, means this is the average value of per hour rate of our peers. p-value\<0.001, the lambda is significant, indicating that the 1 unit change in our peers' hour rate, our rate will consistently change 0.903 unit under the same direction.
+
+```{r, echo=TRUE, warning=FALSE, message=FALSE}
+#Saving the residuals
+hNULL<-residuals(Hrrate90Ad)
+summary(hNULL)
+#Testing residuals for sp dependence
+moran.test(hNULL,listwAd, zero.policy=TRUE)
+```
+
+Since the p-value for Moran I test is 0.430 \> 0.05, indicating that the residual is i.i.d. Now we can say that the dependence issue addressed with the empty regression friendship models in terms of per hour rate.
+
+```{r, echo=TRUE, warning=FALSE, message=FALSE}
+#SAR procedures for social dependence for outcome 2 - Fees Brought in 1990
+fees90Ad <- spautolm(formula = FeesCollec90 ~ 1, data = data.frame(datattrout), listw = listwAd)
+summary(fees90Ad)
+```
+
+lambda = 0.871, means this is the average value of fees brought in 1990 of our peers. p-value\<0.001, the lambda is significant, indicating that the 1 unit change in our peers' fees brought in 1990, our fees will consistently change 0.871 unit under the same direction.
+
+```{r, echo=TRUE, warning=FALSE, message=FALSE}
+#Saving the residuals
+hNULL2<-residuals(fees90Ad)
+#Testing residuals for sp dependence
+moran.test(hNULL2, listwAd, zero.policy=TRUE)
+```
+
+Since the p-value for Moran I test is 0.446 \> 0.05, indicating that the residual is i.i.d. Now we can say that the dependence issue addressed with the empty regression friendship models in terms of fees brought in 1990.
+
+## Q3 Are there any lagged indicators that you may be interested in testing?
+
+```{r, echo=TRUE, warning=FALSE, message=FALSE}
+#First run the feature importance analysis
+#install.packages("Boruta")
+library(Boruta)
+
+set.seed(123)
+boruta.train <- Boruta(HrRATE90 ~. , data.frame(datattrout), doTrace = 2)
+print(boruta.train)
+
+plot(boruta.train, xlab = "", xaxt = "n")
+lz<-lapply(1:ncol(boruta.train$ImpHistory),function(i)
+  boruta.train$ImpHistory[is.finite(boruta.train$ImpHistory[,i]),i])
+names(lz) <- colnames(boruta.train$ImpHistory)
+Labels <- sort(sapply(lz,median))
+axis(side = 1,las=2,labels = names(Labels),
+     at = 1:ncol(boruta.train$ImpHistory), cex.axis = 0.7)
+#the plots show that yearsfirm and partner status are importance features.
+
+```
+
+```{r, echo=TRUE, warning=FALSE, message=FALSE}
+#Getting socially lagged indicators- whether my friends years at firm will impact my salary
+datattrout$lag.yearsfirmAd <- lag.listw(listwAd, datattrout$yearsfirm,
+                                        zero.policy=T, na.action=na.omit)
+#Network visualization
+Hrrate90Adwithlag1 <- spautolm(formula = HrRATE90 ~ lag.yearsfirmAd ,
+                               data = data.frame(datattrout), listw = listwAd)
+summary(Hrrate90Adwithlag1)
+```
+
+Interpretation: My peers years at firm is significantly associated with my salary with p-value\<0.001. For each additional year my friend has been with the company, my salary will increase by $5.46$.
+
+```{r, echo=TRUE, warning=FALSE, message=FALSE}
+#Getting socially lagged indicators- whether my friends are partners 
+datattrout$lag.partnersAd <- lag.listw(listwAd, datattrout$partner, zero.policy=T, na.action=na.omit)
+#Network visualization
+Hrrate90Adwithlag2 <- spautolm(formula = HrRATE90 ~ lag.partnersAd , data = data.frame(datattrout), listw = listwAd)
+summary(Hrrate90Adwithlag2)
+```
+
+Interpretation: My peers are partners status is significantly associated with my salary with p-value\<0.001. If 100% of my friends are all partners, my salary goes up by 94.78.
+
+## Q4 After removing isolates:a. How many higher order neighbors did you find? b.Does this change by outcome?
+
+```{r, echo=TRUE, warning=FALSE, message=FALSE}
+#How are disconnected unit influencing these results and how to remove them?
+#########
+sub_listNAd <- subset(listwAd[[2]], subset=card(listwAd[[2]])> 0)
+sub_listNAd
+summary(sub_listNAd)
+#add weights,using style="W" (the normalized version of weights)
+sub_listWAd <- nb2listw(sub_listNAd, glist=NULL, style="W", zero.policy=NULL) 
+#making this a spatial points dataframe
+sub_datattrout <- subset(datattrout, subset=card(listwAd[[2]]) > 0)
+dim(sub_datattrout)
+```
+
+## Q4(2) same with Q5,Q6. Does this change by outcome? Test with new sub_datatrout
+
+```{r, echo=TRUE, warning=FALSE, message=FALSE}
+# How do the Moran's I estimates change when removing isolate?
+moran.test(sub_datattrout$HrRATE90,sub_listWAd, zero.policy=TRUE)
+moran.test(sub_datattrout$FeesCollec90,sub_listWAd, zero.policy=TRUE)
+```
+
+The results changed after we removed the isolated samples. Specifically, the Moran I for per hour rate is 0.684 with p-value\<0.001, the Moran I for the fees brought in 1990 is 0.528 with p-value\<0.001. The Moran I values all increased after removing isolated individuals.
+
+## Q4(1) a.How many higher order neighbors did you find?
+
+```{r, echo=TRUE, warning=FALSE, message=FALSE}
+plot.spcor(sp.correlogram(sub_listNAd, sub_datattrout$HrRATE90, order = 6, 
+                          method = "I", zero.policy=T), xlab = "Social lags", main = "Social correlogram: Autocorrelation with CIs")
+
+plot.spcor(sp.correlogram(sub_listNAd, sub_datattrout$FeesCollec90, order = 6, method = "I", 
+                          zero.policy=T), xlab = "Social lags", main = "Social correlogram: Autocorrelation with CIs")
+```
+
+The first 2 order is enough for us to establish a data driven selection of neighboring structures in terms of per hour rate, and first 2 order for fees brought in 1990 as well.
